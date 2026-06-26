@@ -1,0 +1,13 @@
+{
+  "name": "social-media-autopilot-ai",
+  "version": "1.0.0",
+  "scripts": {
+    "install-deps": "cd backend && npm install",
+    "build": "cd backend && npm run build",
+    "start": "cd backend && npm start"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=9.0.0"
+  }
+}
