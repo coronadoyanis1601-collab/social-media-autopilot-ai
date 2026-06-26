@@ -1,196 +1,171 @@
 import OpenAI from 'openai';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Lazy initialization - don't crash if key missing at startup
+let _client: OpenAI | null = null;
+
+function getClient(): OpenAI {
+  if (!_client) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error('OPENAI_API_KEY environment variable is not set');
+    }
+    _client = new OpenAI({ apiKey });
+  }
+  return _client;
+}
+
+const PLATFORMS = ['facebook', 'instagram', 'tiktok', 'youtube', 'twitter', 'linkedin', 'whatsapp', 'messenger', 'spotify', 'snapchat'] as const;
 
 export async function analyzeContent(content: {
   title: string;
   media_type: string;
   original_text?: string;
-  brand?: any;
-}) {
-  const brandContext = content.brand ? `
-Marque: ${content.brand.brand_name}
-Niche: ${content.brand.niche}
-Audience cible: ${content.brand.target_audience}
-Ton de voix: ${content.brand.tone_of_voice}
-Sujets interdits: ${content.brand.forbidden_topics}
-Langue: ${content.brand.content_language}
-` : '';
-
+  target_platforms?: string[];
+}): Promise<any> {
+  const client = getClient();
   const prompt = `Tu es un expert en stratégie de contenu social media. Analyse ce contenu et retourne un JSON structuré.
 
-CONTENU À ANALYSER:
+Contenu:
 - Titre: ${content.title}
 - Type: ${content.media_type}
-- Texte: ${content.original_text || 'Aucun texte fourni'}
-${brandContext}
+- Texte: ${content.original_text || 'Non fourni'}
+- Plateformes cibles: ${(content.target_platforms || []).join(', ')}
 
-Retourne UNIQUEMENT ce JSON (sans markdown):
+Retourne UNIQUEMENT un JSON valide avec cette structure exacte:
 {
   "subject": "sujet principal du contenu",
   "target_audience": "audience cible probable",
   "emotion": "émotion principale transmise",
-  "hook_quality": "évaluation du hook actuel (Excellent/Bon/Moyen/Faible)",
-  "strengths": "points forts du contenu (liste)",
-  "weaknesses": "points faibles du contenu (liste)",
-  "flop_risks": "risques de mauvaises performances",
-  "improvement_suggestions": "suggestions d'amélioration concrètes",
+  "hook_quality": "évaluation du hook sur 10",
+  "strengths": ["force 1", "force 2", "force 3"],
+  "weaknesses": ["faiblesse 1", "faiblesse 2"],
+  "flop_risks": ["risque 1", "risque 2"],
+  "improvement_suggestions": ["suggestion 1", "suggestion 2", "suggestion 3"],
   "viral_score": 75,
   "viral_score_explanation": "explication détaillée du score",
-  "score_breakdown": {
-    "hook": 8,
-    "clarity": 7,
-    "emotion": 8,
-    "originality": 6,
-    "shareability": 7,
-    "comment_potential": 8,
-    "platform_fit": 7,
-    "visual_quality": 7,
-    "rhythm": 6,
-    "cta": 7
-  },
-  "what_boosts_score": "ce qui augmente le potentiel viral",
-  "what_limits_score": "ce qui limite la portée",
-  "what_to_change": "modifications recommandées pour améliorer le score"
+  "ai_analysis": "analyse complète en 3-4 phrases"
 }`;
 
-  const response = await openai.chat.completions.create({
+  const response = await client.chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [{ role: 'user', content: prompt }],
+    response_format: { type: 'json_object' },
     temperature: 0.7,
-    max_tokens: 2000
   });
 
-  const text = response.choices[0].message.content || '{}';
-  try {
-    return JSON.parse(text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
-  } catch {
-    return { error: 'Parsing error', raw: text };
-  }
+  return JSON.parse(response.choices[0].message.content || '{}');
 }
 
-export async function generatePlatformContent(params: {
-  content: any;
-  platform: string;
-  analysis: any;
-  brand?: any;
-}) {
-  const { content, platform, analysis, brand } = params;
-
-  const brandCtx = brand ? `Marque: ${brand.brand_name}, Ton: ${brand.tone_of_voice}, Langue: ${brand.content_language || 'Français'}` : '';
-
+export async function generatePlatformContent(
+  platform: string,
+  content: {
+    title: string;
+    original_text?: string;
+    subject?: string;
+    target_audience?: string;
+    emotion?: string;
+  }
+): Promise<any> {
+  const client = getClient();
   const platformGuides: Record<string, string> = {
-    Facebook: 'Caption 400-500 mots max, 2-5 hashtags, storytelling',
-    Instagram: 'Caption Reel 150-300 mots, caption post 125-300 mots, 5-15 hashtags',
-    TikTok: 'Caption 150 mots max, hook dans les 3 premières secondes, 3-5 hashtags ciblés',
-    YouTube: 'Titre 60-70 chars SEO, description 200-300 mots, 10-15 tags',
-    'X/Twitter': 'Post 280 chars max, thread 3-7 tweets, 1-2 hashtags',
-    LinkedIn: 'Post 1300 chars max, ton professionnel, 3-5 hashtags pro',
-    WhatsApp: 'Message 500 mots max, direct, conversationnel, opt-in obligatoire',
-    Messenger: 'Court, conversationnel, max 3 questions qualification',
-    Spotify: 'Titre épisode 60 chars, description 150-500 mots',
-    Snapchat: 'Caption 50-80 chars, spontané, direct, ton jeune'
+    facebook: 'Caption engageante (400-500 mots max), version courte, version storytelling, 2-5 hashtags, call-to-action, idée de commentaire épinglé',
+    instagram: 'Caption Reel (150-300 mots), caption post, caption story (50-100 mots), 5-15 hashtags, texte à l\'écran, idée de cover, format recommandé (Reel/carrousel/post/story)',
+    tiktok: 'Hook de départ percutant, caption courte (150 mots max), 3-5 hashtags ciblés, script voix off, texte à afficher, idée de montage, suggestion musicale, durée recommandée',
+    youtube: 'Titre Short (60-70 chars), titre vidéo longue, description SEO (200-300 mots), 10-15 tags, chapitres si applicable, idée miniature, commentaire épinglé',
+    twitter: 'Post court (280 chars), version punchline, thread de 3-7 tweets, 1-2 hashtags max, angle polémique/conversationnel',
+    linkedin: 'Post professionnel, version storytelling, version éducative, hook B2B, 3-5 hashtags professionnels, format suggéré (texte/image/carrousel/vidéo)',
+    whatsapp: 'Message court audience (500 mots max), version promo, version informative, séquence relance (2 max), message de suivi',
+    messenger: 'Réponse automatique, message qualification prospect, message relance, message support client',
+    spotify: 'Titre épisode podcast (60 chars max), description épisode (150-500 mots), résumé, notes d\'épisode, phrases promo pour autres réseaux',
+    snapchat: 'Caption courte (50-80 chars), idée Spotlight, texte à afficher, sticker recommandé, version spontanée, idée story',
   };
 
-  const prompt = `Tu es un expert copywriting viral. Génère du contenu optimisé pour ${platform}.
+  const guide = platformGuides[platform] || 'Génère un contenu adapté à la plateforme';
 
-CONTENU SOURCE:
+  const prompt = `Tu es un expert en content marketing. Génère du contenu optimisé pour ${platform.toUpperCase()}.
+
+Contenu source:
 - Titre: ${content.title}
-- Type: ${content.media_type}
-- Texte original: ${content.original_text || ''}
-- Analyse IA: Sujet=${analysis.subject}, Audience=${analysis.target_audience}, Émotion=${analysis.emotion}
-- ${brandCtx}
+- Texte: ${content.original_text || 'Non fourni'}
+- Sujet: ${content.subject || 'Non défini'}
+- Audience: ${content.target_audience || 'Non définie'}
+- Émotion: ${content.emotion || 'Non définie'}
 
-GUIDE ${platform}: ${platformGuides[platform] || ''}
+Consignes pour ${platform}: ${guide}
 
-Retourne UNIQUEMENT ce JSON (sans markdown):
+Retourne UNIQUEMENT un JSON valide avec:
 {
-  "hook": "hook accrocheur pour ${platform}",
-  "caption": "caption principale adaptée à ${platform}",
-  "caption_short": "version courte de la caption",
-  "caption_storytelling": "version storytelling engageante",
-  "hashtags": "#hashtag1 #hashtag2 #hashtag3",
-  "call_to_action": "CTA clair et engageant",
-  "title": "titre optimisé (pour YouTube/Spotify/TikTok)",
-  "description": "description SEO (pour YouTube/Spotify)",
-  "script": "script voix off ou texte parlé (pour vidéos/podcasts)",
-  "on_screen_text": "texte à afficher à l'écran",
-  "editing_recommendations": "recommandations de montage spécifiques",
-  "cover_idea": "idée de visuel/miniature/cover",
-  "music_suggestion": "suggestion musicale libre de droits",
-  "recommended_format": "format recommandé (Reel/Carrousel/Post/Story/Thread...)",
+  "caption": "caption principale",
+  "caption_short": "version courte",
+  "caption_storytelling": "version storytelling",
+  "hashtags": ["hashtag1", "hashtag2"],
+  "hook": "hook d'accroche",
+  "call_to_action": "CTA",
+  "title": "titre si applicable",
+  "description": "description si applicable",
+  "script": "script voix off si applicable",
+  "on_screen_text": "texte à l'écran",
+  "editing_recommendations": "recommandations de montage",
+  "cover_idea": "idée de cover/miniature",
+  "music_suggestion": "suggestion musicale",
+  "recommended_format": "format recommandé",
   "recommended_duration": "durée recommandée",
-  "pinned_comment": "commentaire à épingler",
-  "thread_tweets": ["tweet 1", "tweet 2", "tweet 3"],
-  "seo_tags": "tag1, tag2, tag3",
-  "chapters": "00:00 Intro\n02:30 Point 1\n05:00 Conclusion",
-  "is_compliant": true,
-  "compliance_warnings": ""
+  "pinned_comment": "commentaire épinglé si applicable",
+  "thread_tweets": ["tweet1", "tweet2", "tweet3"],
+  "seo_tags": ["tag1", "tag2"],
+  "chapters": "chapitres si applicable"
 }`;
 
-  const response = await openai.chat.completions.create({
+  const response = await client.chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [{ role: 'user', content: prompt }],
+    response_format: { type: 'json_object' },
     temperature: 0.8,
-    max_tokens: 3000
   });
 
-  const text = response.choices[0].message.content || '{}';
-  try {
-    return JSON.parse(text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
-  } catch {
-    return { error: 'Parsing error', raw: text };
-  }
+  return JSON.parse(response.choices[0].message.content || '{}');
 }
 
-export async function generateImprovementReport(params: {
-  content: any;
-  analytics: any;
-  predicted_score: number;
-}) {
-  const { content, analytics, predicted_score } = params;
+export async function generateImprovementReport(analytics: {
+  platform: string;
+  views?: number;
+  likes?: number;
+  comments?: number;
+  shares?: number;
+  engagement_rate?: number;
+  retention_rate?: number;
+  predicted_score?: number;
+}): Promise<string> {
+  const client = getClient();
+  const prompt = `Tu es un analyste de performance social media. Génère un rapport d'amélioration basé sur ces analytics.
 
-  const prompt = `Tu es un analyste de performance social media. Génère un rapport d'amélioration.
-
-DONNÉES:
-- Contenu: ${content.title} (${content.media_type})
+Analytics:
 - Plateforme: ${analytics.platform}
-- Score viral prédit: ${predicted_score}/100
-- Score réel: ${analytics.actual_performance_score || 'N/A'}/100
-- Vues: ${analytics.views}, Likes: ${analytics.likes}, Commentaires: ${analytics.comments}
-- Partages: ${analytics.shares}, Sauvegardes: ${analytics.saves}
-- Taux engagement: ${analytics.engagement_rate}%, Portée: ${analytics.reach}
+- Vues: ${analytics.views || 0}
+- Likes: ${analytics.likes || 0}
+- Commentaires: ${analytics.comments || 0}
+- Partages: ${analytics.shares || 0}
+- Taux d'engagement: ${analytics.engagement_rate || 0}%
+- Taux de rétention: ${analytics.retention_rate || 0}%
+- Score viral prédit: ${analytics.predicted_score || 0}/100
 
-Retourne UNIQUEMENT ce JSON (sans markdown):
-{
-  "what_worked": "ce qui a bien fonctionné",
-  "what_failed": "ce qui n'a pas fonctionné",
-  "why": "analyse des causes de performance",
-  "next_recommendations": "recommandations pour le prochain contenu",
-  "new_hooks_to_test": ["hook 1", "hook 2", "hook 3"],
-  "new_formats_to_test": ["format 1", "format 2"],
-  "platforms_to_prioritize": ["plateforme 1", "plateforme 2"],
-  "topics_to_avoid": ["sujet à éviter 1"],
-  "topics_to_repeat": ["sujet à répéter 1"],
-  "new_ideas": [
-    {"title": "idée 1", "description": "desc", "format": "Reel", "hook": "hook idea"},
-    {"title": "idée 2", "description": "desc", "format": "Carrousel", "hook": "hook idea"}
-  ]
-}`;
+Génère un rapport structuré en français avec:
+1. Ce qui a marché
+2. Ce qui n'a pas marché
+3. Pourquoi
+4. Recommandations pour le prochain contenu
+5. Nouveaux hooks à tester
+6. Formats à tester
+7. Plateformes à privilégier
+8. Sujets à éviter/répéter`;
 
-  const response = await openai.chat.completions.create({
+  const response = await client.chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
-    max_tokens: 2000
   });
 
-  const text = response.choices[0].message.content || '{}';
-  try {
-    return JSON.parse(text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
-  } catch {
-    return { error: 'Parsing error' };
-  }
+  return response.choices[0].message.content || '';
 }
 
-export default openai;
+export { PLATFORMS };
