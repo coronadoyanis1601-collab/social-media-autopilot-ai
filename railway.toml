@@ -3,5 +3,4 @@ builder = "nixpacks"
 buildCommand = "cd backend && npm install && npm run build"
 
 [deploy]
-startCommand = "cd backend && npm start"
-restartPolicyType = "on-failure"
+startCommand = "node backend/dist/index.js"
